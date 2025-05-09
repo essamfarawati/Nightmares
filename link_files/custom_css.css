@@ -1,0 +1,94 @@
+.bar .logo {
+    max-height: 3.007143em;
+    margin-top: -20px;
+}
+
+.switchable {
+    background: radial-gradient(at 50% -20%,#02aab0 ,#00cdac) fixed;
+    margin-top: 0px;
+}
+
+.bar {
+    background: radial-gradient(at 50% -20%,#02aab0 ,#00cdac) fixed;
+    position: fixed;
+    top: 0;
+    width: 100%;
+    z-index: 2;
+}
+
+.col-lg-8 {
+    flex: 0 0 66.666667%;
+    max-width: 66.6666666667%;
+    margin-top: 90px;
+}
+
+footer.space--xs {
+    padding-top: 1.2em;
+    padding-bottom: 1.2em;
+}
+
+.menu-horizontal > li > a, .menu-horizontal > li > .modal-instance > a {
+    font-weight: 700;
+}
+
+.bar__module:not(:last-child) {
+    margin-right: 3em !important;
+}
+
+.menu-horizontal li:not(:last-child) {
+    border-left: solid;
+    padding-left: 7px;
+    border-color: #00d7c0;
+}
+
+.menu-horizontal > li {
+    border-left: solid;
+    padding-left: 7px;
+    border-color: #00d7c0;
+}
+
+.btn--primary, .btn--primary:visited {
+    background: #3fc143;
+    border-color: #4ae287;
+}
+
+.accordion li.active .accordion__title {
+    background: #02b2b2;
+    border-bottom: 1px solid #ececec;
+}
+
+.btn--primary:hover {
+    background: #03b0ae;
+}
+
+.boxed {
+    border-radius: 75px;
+}
+
+.type--fine-print {
+    font-size: 0.957143em;
+}
+
+footer.text-center-xs {
+    background: url(/imgs/footer-bg.png) no-repeat;
+    background-size: cover;
+    padding-top: 5em;
+    height: 200px;
+}
+
+.back-to-top {
+    background: #3fc143;
+}
+
+section.space--sm, footer.space--sm {
+    padding-top: 5.952381em;
+}
+
+.gradient-bg {
+    background: radial-gradient(at 50% -20%, #02aab0, #00cdac) fixed;
+    padding-bottom: 10px;
+    padding-top: 10px;
+    width: 100%;
+    font-weight: bold;
+    color: #fff;
+}
