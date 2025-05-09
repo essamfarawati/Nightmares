@@ -1,0 +1,418 @@
+(function() {
+    var upgradeWidgetDiv = null;
+    var checkout = null;
+    var upgradeWidgetCallback = null;
+    var planId = null;
+    var customerId = null;
+	var customerEmail = null;
+    var customerPaid = false;
+
+    async function loadScript(src) {
+        return new Promise((resolve) => {
+            var script = document.createElement('script');
+            script.onload = resolve;
+            script.async = false;
+            script.type = 'text/javascript';
+            script.src = src;
+            var node = document.getElementsByTagName('script')[0];
+            node.parentNode.insertBefore(script, node);
+        });
+    }
+
+    const getStripeAPIKey = async () => {
+        try {
+            const response = await fetch('/application/upgrade_widget.php?action=get_stripe_key');
+            return await response.json();
+        } catch (error) {
+            return false;
+        }
+    };
+
+    const getAccountStatus = async () => {
+        try {
+            const response = await fetch("/application/upgrade_widget.php?action=get_account_status");
+            return await response.json();
+        } catch (error) {
+            return false;
+        }
+    };
+
+	const checkAccountEmailExists = async () => {
+        try {
+            const response = await fetch("/application/upgrade_widget.php?action=check_email_exists&customer_id=" + customerId);
+            return await response.json();
+        } catch (error) {
+            return false;
+        }
+    };
+
+    const getCheckoutSession = async () => {
+        try {
+            const response = await fetch("/application/upgrade_widget.php?action=get_checkout_session&plan=" + planId);
+            const data = await response.json();
+            if (data.result === 'error' || data.checkout_client_secret == false || data.customer == false) {
+                return false;
+            }
+            return data;
+        } catch (error) {
+            return false;
+        }
+    };
+
+
+    function showErrorDialog(message, onClose) {
+        hideSpinner();
+        document.getElementById('error_box_message').innerHTML = message
+        document.getElementById('error_box').style.display = 'block';
+        var closeErrorDialogTimeout = setTimeout(() => { closeErrorDialog(onClose); }, 5000);
+        document.getElementById('error_box').onclick = () => {
+            clearTimeout(closeErrorDialogTimeout);
+            closeErrorDialog(onClose);
+        };
+    }
+
+    function closeErrorDialog(onClose) {
+        document.getElementById('error_box').style.display = 'none';
+        onClose && onClose();
+    }
+
+    async function getCode(codeId, data) {
+        try {
+            const response = await fetch("/application/upgrade_widget.php?action=get_code&code_id=" + codeId + '&' + new URLSearchParams(data));
+            const { code } = await response.json();
+            return code;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    async function loadCodeIntoWidgetContent(codeId, data = {}) {
+        if (await initUpgradeWidget() === false) {
+            return false;
+        }
+        const code = await getCode(codeId, data);
+        if (code === false) {
+            return false;
+        }
+        document.getElementById('upgrade_widget_content').innerHTML = code;
+
+		document.getElementById('upgrade_widget_close').style.display =
+			['widget_reset_password'].indexOf(codeId) === -1 ? 'block' : 'none';
+
+        return true;
+    }
+
+    async function initUpgradeWidget() {
+        // Create the div element that the Checkout form will be placed into
+        if (upgradeWidgetDiv === null) {
+            const code = await getCode('widget_container');
+            if (code === false) {
+                return false;
+            }
+            document.body.insertAdjacentHTML("beforeend", code);
+            upgradeWidgetDiv = document.getElementById('upgrade_widget');
+            document.getElementById('upgrade_widget_close').addEventListener('click', () => {
+                errorOut('Upgrade process was cancelled.', false);
+            });
+			window.addEventListener('resize', refreshWidgetSize);
+        }
+
+        upgradeWidgetDiv.style.display = 'block';
+        document.getElementById('upgrade_widget_content').innerHTML = '';
+        return true;
+    }
+
+    function close() {
+		hideSpinner();
+        try {
+            checkout && checkout.destroy();
+        } catch (error) {}
+
+        upgradeWidgetDiv.style.display = 'none';
+        if (customerPaid) {
+            handlePaidCustomerFailure();
+        }
+    }
+
+    function doCallback(success, data) {
+        try {
+            if (typeof upgradeWidgetCallback == "function") {
+                upgradeWidgetCallback(success, data);
+            }
+        } catch (error) {}
+    }
+
+    function errorOut(message, showErrorMessage = true) {
+        if (upgradeWidgetDiv && upgradeWidgetDiv.style.display === 'block') {
+            hideSpinner();
+            if (showErrorMessage) {
+                showErrorDialog(message, () => {
+                    doCallback(false, message);
+                    close();
+                });
+                return;
+            }
+        }
+        doCallback(false, message);
+		close();
+    }
+
+    async function checkAccountLoggedIn(onSuccess, onError, tryCount = 0) {
+        const response = await getAccountStatus();
+        if (response === false) {
+            if (tryCount >= 10) {
+                onError();
+            } else {
+                setTimeout(() => {
+                    checkAccountLoggedIn(onSuccess, onError, tryCount + 1);
+                }, 1000);
+            }
+            return;
+        }
+
+        onSuccess(response.is_logged_in, response.email);
+    }
+
+    async function checkAccountPremium(onSuccess, onError, tryCount = 0) {
+        const response = await getAccountStatus();
+        if (response === false || response.is_premium === false) {
+            if (tryCount >= 10) {
+                onError();
+            } else {
+                setTimeout(() => {
+                    checkAccountPremium(onSuccess, onError, tryCount + 1);
+                }, 1000);
+            }
+            return;
+        }
+
+        onSuccess();
+    }
+
+	var wWidth, wHeight;
+    function setWidgetSize(width, height) {
+		wWidth = width;
+		wHeight = height;
+		refreshWidgetSize();
+	}
+
+	function refreshWidgetSize() {
+        if (upgradeWidgetDiv === null) {
+            return;
+        }
+
+		var width = Math.min(wWidth, window.innerWidth);
+        upgradeWidgetDiv.style.width = width + 'px';
+        upgradeWidgetDiv.style.marginLeft = - (width / 2).toFixed() + 'px';
+
+		var height = Math.min(wHeight, window.innerHeight);
+
+        upgradeWidgetDiv.style.height = height + 'px';
+        upgradeWidgetDiv.style.marginTop = - (height / 2).toFixed() + 'px';
+    }
+
+    function handlePaidCustomerFailure() {
+        fetch('\application/upgrade_widget.php?action=handle_paid_customer_failure&customer_id=' + customerId);
+        customerPaid = false;
+    }
+
+    async function formLoginSubmit () {
+        const security = document.getElementById('login_widget_token').value;
+        const email = document.getElementById('login_widget_email').value;
+        const password = document.getElementById('login_widget_pass').value;
+        if (!security || !email || !password) {
+            showErrorDialog('Please fill in all fields.');
+            return;
+        }
+
+        try {
+            showSpinner();
+            const response = await fetch('/dynamic/client_login/mediafire.php', {
+                method: "POST",
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    security: security,
+                    login_email: email,
+                    login_pass: password
+                }).toString(),
+            });
+            hideSpinner();
+
+            const data = await response.json();
+            if (data.action == 15) {
+                // Login successfull
+
+                const response = await fetch("/application/upgrade_widget.php?action=logged_in&customer_id=" + customerId);
+				const data = await response.json();
+                if (data === false || data.result === 'error') {
+                    errorOut('Failed to complete the upgrade process. Please try again or contact support.');
+                    return;
+                }
+
+				doCallback(true, {email: email});
+				close();
+            } else {
+                showErrorDialog('Failed to login to your account. Please verify your email and password and try again.');
+            }
+        } catch (error) {
+            showErrorDialog('Failed to login to your account. Please try again or contact support.');
+        }
+    };
+
+    function showSpinner() {
+        const spinner = document.getElementById('upgrade_widget_spinner');
+        if (spinner) spinner.style.display = 'block';
+    }
+
+    function hideSpinner() {
+        const spinner = document.getElementById('upgrade_widget_spinner');
+        if (spinner) spinner.style.display = 'none';
+    }
+
+    async function launchLogin(email) {
+        const result = await loadCodeIntoWidgetContent('widget_login', email ? {email: email} : {});
+        if (result === false) {
+            errorOut('Failed to load the login page. Please try again or contact support.');
+            return;
+        }
+        setWidgetSize(600, 400);
+
+        document.getElementById('form_login').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            formLoginSubmit();
+        });
+		hideSpinner();
+    }
+
+    async function signup() {
+		const response = await fetch("/application/upgrade_widget.php?action=register&customer_id=" + customerId);
+        const data = await response.json();
+		if (data.result === 'error') {
+            errorOut('Failed to signup for an account: '+data.error_message+'. Please try again or contact support.');
+			return;
+        }
+		customerEmail = data.email;
+
+		launchResetPassword();
+	}
+
+	async function launchResetPassword() {
+		const result = await loadCodeIntoWidgetContent('widget_reset_password');
+        if (result === false) {
+            errorOut('Failed to proceed with the upgrade. Please try again or contact support.');
+            return;
+        }
+        setWidgetSize(600, 432);
+
+		document.getElementById('reset_pw_continue').addEventListener('click', function() {
+			doCallback(true, {email: customerEmail});
+			close();
+		});
+		hideSpinner();
+    }
+
+	async function processLoggedOutState() {
+		const response = await checkAccountEmailExists();
+		if (response !== false && response.account_exists) {
+			launchLogin(response.email);
+		} else {
+			signup();
+		}
+	}
+
+    async function launchCheckout() {
+		if (await initUpgradeWidget() == false) {
+            errorOut('Failed to load the Checkout page. Please contact support.');
+            return;
+        }
+		setWidgetSize(1010, 1000);
+
+        showSpinner();
+
+        // Load Stripe JS library
+        await loadScript('https://js.stripe.com/v3/');
+
+        // create checkout page
+        const data = await getStripeAPIKey();
+        if (data === false || data.result === 'error') {
+            errorOut('Faile to load Checkout page. Please contact support.');
+            return;
+        }
+        const StripeAPIKey = data.publishable_key;
+
+        const stripe = Stripe(StripeAPIKey);
+
+        const checkoutSession = await getCheckoutSession();
+        if (checkoutSession === false) {
+            errorOut('Failed to load the Checkout page. Please contact support.');
+            return;
+        }
+        customerId = checkoutSession.customer_id;
+
+        const fetchClientSecret = () => { return checkoutSession.checkout_client_secret };
+
+        const handleComplete = async function() {
+            customerPaid = true;
+
+            // Destroy Checkout instance
+            checkout.destroy();
+			showSpinner();
+
+            checkAccountLoggedIn((loggedIn, email) => {
+                if (loggedIn) {
+                    checkAccountPremium(() => {
+                        doCallback(true, {email: email});
+                        close();
+                    }, () => {
+                        errorOut(false, 'There was an internal error completing the upgrade process. Please contact support.');
+                    });
+                } else {
+					processLoggedOutState();
+                }
+            }, () => {
+                errorOut(false, 'There was an internal error completing the upgrade process. Please contact support.');
+            });
+        }
+
+        checkout = await stripe.initEmbeddedCheckout({
+            fetchClientSecret,
+            onComplete: handleComplete
+        });
+
+        checkout.mount('#upgrade_widget_content');
+
+        hideSpinner();
+    }
+
+    async function launch(plan, callback) {
+        upgradeWidgetCallback = callback;
+        planId = plan;
+
+        const response = await getAccountStatus();
+        if (response === false) {
+            errorOut('Failed to get account status. Please try again or contact support.');
+            return;
+        }
+
+        const { is_logged_in, is_premium } = response;
+
+        // If if no already premium
+        if (is_logged_in && is_premium) {
+            errorOut('You are already subscribed to a premium plan.');
+            return;
+        }
+
+		launchCheckout();
+    }
+
+    window.upgradeWidget = {
+        launch: function(success, data) {
+            launch(success, data);
+        },
+        cancel: function() {
+            close();
+        },
+    };
+})();
